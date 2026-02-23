@@ -1,25 +1,64 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
+
+/**
+ * Generates a loud, attention-grabbing trading alert using Web Audio API.
+ * Plays a triple-beep pattern: three ascending tones.
+ */
+function playAlertSound(volume: number = 1.0) {
+  try {
+    const ctx = new AudioContext();
+    const now = ctx.currentTime;
+
+    // Three ascending beeps: 800Hz, 1000Hz, 1200Hz
+    const frequencies = [800, 1000, 1200];
+    const beepDuration = 0.12;
+    const gap = 0.08;
+
+    for (let i = 0; i < frequencies.length; i++) {
+      const startTime = now + i * (beepDuration + gap);
+
+      const oscillator = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+
+      oscillator.type = 'square';
+      oscillator.frequency.setValueAtTime(frequencies[i], startTime);
+
+      // Sharp attack, sustain, quick release
+      gainNode.gain.setValueAtTime(0, startTime);
+      gainNode.gain.linearRampToValueAtTime(volume, startTime + 0.01);
+      gainNode.gain.setValueAtTime(volume, startTime + beepDuration - 0.02);
+      gainNode.gain.linearRampToValueAtTime(0, startTime + beepDuration);
+
+      oscillator.connect(gainNode);
+      gainNode.connect(ctx.destination);
+
+      oscillator.start(startTime);
+      oscillator.stop(startTime + beepDuration);
+    }
+
+    // Clean up context after sound finishes
+    const totalDuration = frequencies.length * (beepDuration + gap);
+    setTimeout(() => ctx.close(), (totalDuration + 0.5) * 1000);
+  } catch (e) {
+    console.log('Audio alert failed:', e);
+  }
+}
 
 export function useSoundAlert(trigger: any) {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const lastTriggerRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    // Create audio element once
-    if (!audioRef.current) {
-      // Simple chime sound (data URI to avoid external dependencies if possible, or use a public URL)
-      // Using a short pleasant chime sound from a public CDN or similar would be ideal.
-      // For now, let's use a generated beep or a placeholder. 
-      // Actually, a data URI is safest for "no external assets".
-      // This is a short "ding" sound.
-      audioRef.current = new Audio("https://codeskulptor-demos.commondatastorage.googleapis.com/GalaxyInvaders/pause.wav");
-      audioRef.current.volume = 0.5;
-    }
+  const play = useCallback(() => {
+    playAlertSound(1.0); // Full volume
   }, []);
 
   useEffect(() => {
-    if (trigger && audioRef.current) {
-      audioRef.current.currentTime = 0;
-      audioRef.current.play().catch(e => console.log("Audio play failed (user interaction needed first):", e));
-    }
-  }, [trigger]);
+    if (!trigger) return;
+
+    // Deduplicate: only play if trigger changed
+    const triggerKey = JSON.stringify(trigger);
+    if (triggerKey === lastTriggerRef.current) return;
+    lastTriggerRef.current = triggerKey;
+
+    play();
+  }, [trigger, play]);
 }
