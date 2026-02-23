@@ -16,59 +16,62 @@ export interface FetchLog {
   message: string;
 }
 
-interface YahooChartResult {
-  chart: {
-    result: Array<{
+interface YahooChartResponse {
+  chart?: {
+    result?: Array<{
       meta: { regularMarketPrice: number; symbol: string };
       timestamp: number[];
       indicators: {
         quote: Array<{
-          open: (number | null)[];
-          high: (number | null)[];
-          low: (number | null)[];
           close: (number | null)[];
         }>;
       };
-    }> | null;
-    error: { code: string; description: string } | null;
+    }>;
+    error?: { code: string; description: string };
   };
+  error?: string;
 }
 
-function processChartResult(
-  result: YahooChartResult['chart']['result'] extends (infer T)[] ? T : never,
+function processSingleResult(
+  json: YahooChartResponse,
   symbolObj: SymbolDef
 ): ScannerData {
-  if (!result?.indicators?.quote?.[0]?.close) {
-    return {
-      symbol: symbolObj.symbol,
-      display: symbolObj.display,
-      currentPrice: 0,
-      bands: null,
-      status: 'ok',
-      lastUpdated: Date.now(),
-      history: [],
-      bandPosition: 0.5,
-      proximityPct: 0,
-      fetchError: 'No chart data',
-    };
+  const errBase: ScannerData = {
+    symbol: symbolObj.symbol,
+    display: symbolObj.display,
+    currentPrice: 0,
+    bands: null,
+    status: 'ok',
+    lastUpdated: Date.now(),
+    history: [],
+    bandPosition: 0.5,
+    proximityPct: 0,
+  };
+
+  // Server-side error
+  if (json.error) {
+    return { ...errBase, fetchError: json.error };
   }
 
-  const rawCloses = result.indicators.quote[0].close;
-  const closes: number[] = rawCloses.filter(
+  // Yahoo API error
+  if (json.chart?.error) {
+    return { ...errBase, fetchError: json.chart.error.description || json.chart.error.code };
+  }
+
+  const result = json.chart?.result?.[0];
+  if (!result?.indicators?.quote?.[0]?.close) {
+    return { ...errBase, fetchError: 'No chart data' };
+  }
+
+  const closes: number[] = result.indicators.quote[0].close.filter(
     (c): c is number => c !== null && c !== undefined && !isNaN(c)
   );
 
   if (closes.length < 20) {
     return {
-      symbol: symbolObj.symbol,
-      display: symbolObj.display,
+      ...errBase,
       currentPrice: closes[closes.length - 1] ?? result.meta.regularMarketPrice ?? 0,
-      bands: null,
-      status: 'ok',
-      lastUpdated: Date.now(),
       history: closes.slice(-20),
-      bandPosition: 0.5,
-      proximityPct: 0,
       fetchError: `Only ${closes.length} candles (need 20)`,
     };
   }
@@ -142,21 +145,19 @@ export function useMarketData(symbols: SymbolDef[]) {
       let ok = 0;
       let fail = 0;
 
-      // Fetch symbols one at a time with generous delay to avoid 429
-      for (const symbolObj of symbols) {
-        try {
-          const url = `/api/yahoo/v8/finance/chart/${encodeURIComponent(
-            symbolObj.yahoo
-          )}?interval=5m&range=5d&includePrePost=false`;
+      // Use the server-side batch endpoint (handles rate limiting + caching)
+      const yahooSymbols = symbols.map((s) => s.yahoo).join(',');
 
-          const res = await fetch(url);
+      try {
+        const res = await fetch(`/api/charts?symbols=${encodeURIComponent(yahooSymbols)}`);
 
-          if (!res.ok) {
-            const errText = `HTTP ${res.status}`;
-            addLog(symbolObj.symbol, false, errText);
-            results[symbolObj.symbol] = {
-              symbol: symbolObj.symbol,
-              display: symbolObj.display,
+        if (!res.ok) {
+          const errText = `Server error: ${res.status}`;
+          for (const s of symbols) {
+            addLog(s.symbol, false, errText);
+            results[s.symbol] = {
+              symbol: s.symbol,
+              display: s.display,
               currentPrice: 0,
               bands: null,
               status: 'ok',
@@ -167,12 +168,14 @@ export function useMarketData(symbols: SymbolDef[]) {
               fetchError: errText,
             };
             fail++;
-          } else {
-            const json: YahooChartResult = await res.json();
+          }
+        } else {
+          const batchData: Record<string, YahooChartResponse> = await res.json();
 
-            if (json.chart.error) {
-              const msg = json.chart.error.description || json.chart.error.code;
-              addLog(symbolObj.symbol, false, msg);
+          for (const symbolObj of symbols) {
+            const json = batchData[symbolObj.yahoo];
+            if (!json) {
+              addLog(symbolObj.symbol, false, 'No response from server');
               results[symbolObj.symbol] = {
                 symbol: symbolObj.symbol,
                 display: symbolObj.display,
@@ -183,42 +186,47 @@ export function useMarketData(symbols: SymbolDef[]) {
                 history: [],
                 bandPosition: 0.5,
                 proximityPct: 0,
-                fetchError: msg,
+                fetchError: 'No response',
               };
               fail++;
-            } else if (json.chart.result && json.chart.result[0]) {
-              const scannerData = processChartResult(json.chart.result[0], symbolObj);
-              results[symbolObj.symbol] = scannerData;
+              continue;
+            }
 
-              if (scannerData.fetchError) {
-                addLog(symbolObj.symbol, false, scannerData.fetchError);
-                fail++;
-              } else {
-                addLog(
-                  symbolObj.symbol,
-                  true,
-                  `Price: ${scannerData.currentPrice.toFixed(
-                    symbolObj.type === 'stock' ? 2 : 4
-                  )} | Proximity: ${scannerData.proximityPct.toFixed(0)}%`
-                );
-                ok++;
+            const scannerData = processSingleResult(json, symbolObj);
+            results[symbolObj.symbol] = scannerData;
 
-                if (scannerData.status !== 'ok') {
-                  setLastAlert({
-                    symbol: symbolObj.symbol,
-                    type: scannerData.status,
-                    time: Date.now(),
-                  });
-                }
+            if (scannerData.fetchError) {
+              addLog(symbolObj.symbol, false, scannerData.fetchError);
+              fail++;
+            } else {
+              addLog(
+                symbolObj.symbol,
+                true,
+                `Price: ${scannerData.currentPrice.toFixed(
+                  symbolObj.type === 'stock' ? 2 : 4
+                )} | ${scannerData.bandPosition >= 0.5
+                  ? `${Math.round(scannerData.bandPosition * 100)}% to upper`
+                  : `${Math.round((1 - scannerData.bandPosition) * 100)}% to lower`}`
+              );
+              ok++;
+
+              if (scannerData.status !== 'ok') {
+                setLastAlert({
+                  symbol: symbolObj.symbol,
+                  type: scannerData.status,
+                  time: Date.now(),
+                });
               }
             }
           }
-        } catch (err: any) {
-          const msg = err?.message ?? 'Network error';
-          addLog(symbolObj.symbol, false, msg);
-          results[symbolObj.symbol] = {
-            symbol: symbolObj.symbol,
-            display: symbolObj.display,
+        }
+      } catch (err: any) {
+        const msg = err?.message ?? 'Network error';
+        for (const s of symbols) {
+          addLog(s.symbol, false, msg);
+          results[s.symbol] = {
+            symbol: s.symbol,
+            display: s.display,
             currentPrice: 0,
             bands: null,
             status: 'ok',
@@ -230,9 +238,6 @@ export function useMarketData(symbols: SymbolDef[]) {
           };
           fail++;
         }
-
-        // 3 second delay between each request to avoid Yahoo rate limiting
-        await new Promise((r) => setTimeout(r, 3000));
       }
 
       setData((prev) => ({ ...prev, ...results }));
