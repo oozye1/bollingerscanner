@@ -1,0 +1,5 @@
+{
+  "name": "Bollinger Band Scanner",
+  "description": "Real-time trading scanner with Bollinger Band alerts for Forex and Stocks.",
+  "requestFramePermissions": []
+}
