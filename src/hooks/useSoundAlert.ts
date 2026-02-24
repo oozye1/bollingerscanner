@@ -1,18 +1,32 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef } from 'react';
+
+// Shared AudioContext — created once on first user interaction
+let sharedCtx: AudioContext | null = null;
+
+function getAudioContext(): AudioContext {
+  if (!sharedCtx) {
+    sharedCtx = new AudioContext();
+  }
+  return sharedCtx;
+}
 
 /**
- * Generates a loud, attention-grabbing trading alert using Web Audio API.
- * Plays a triple-beep pattern: three ascending tones.
+ * Loud triple-beep alert: three ascending square-wave tones.
+ * Handles AudioContext suspension (browser autoplay policy).
  */
-function playAlertSound(volume: number = 1.0) {
+async function playAlertSound() {
   try {
-    const ctx = new AudioContext();
-    const now = ctx.currentTime;
+    const ctx = getAudioContext();
 
-    // Three ascending beeps: 800Hz, 1000Hz, 1200Hz
+    // Resume if suspended (autoplay policy)
+    if (ctx.state === 'suspended') {
+      await ctx.resume();
+    }
+
+    const now = ctx.currentTime;
     const frequencies = [800, 1000, 1200];
-    const beepDuration = 0.12;
-    const gap = 0.08;
+    const beepDuration = 0.15;
+    const gap = 0.1;
 
     for (let i = 0; i < frequencies.length; i++) {
       const startTime = now + i * (beepDuration + gap);
@@ -23,10 +37,9 @@ function playAlertSound(volume: number = 1.0) {
       oscillator.type = 'square';
       oscillator.frequency.setValueAtTime(frequencies[i], startTime);
 
-      // Sharp attack, sustain, quick release
       gainNode.gain.setValueAtTime(0, startTime);
-      gainNode.gain.linearRampToValueAtTime(volume, startTime + 0.01);
-      gainNode.gain.setValueAtTime(volume, startTime + beepDuration - 0.02);
+      gainNode.gain.linearRampToValueAtTime(1.0, startTime + 0.01);
+      gainNode.gain.setValueAtTime(1.0, startTime + beepDuration - 0.02);
       gainNode.gain.linearRampToValueAtTime(0, startTime + beepDuration);
 
       oscillator.connect(gainNode);
@@ -35,30 +48,35 @@ function playAlertSound(volume: number = 1.0) {
       oscillator.start(startTime);
       oscillator.stop(startTime + beepDuration);
     }
-
-    // Clean up context after sound finishes
-    const totalDuration = frequencies.length * (beepDuration + gap);
-    setTimeout(() => ctx.close(), (totalDuration + 0.5) * 1000);
   } catch (e) {
-    console.log('Audio alert failed:', e);
+    console.warn('Audio alert failed:', e);
   }
+}
+
+// Unlock AudioContext on first user click/touch (browser requirement)
+if (typeof window !== 'undefined') {
+  const unlock = () => {
+    const ctx = getAudioContext();
+    if (ctx.state === 'suspended') {
+      ctx.resume();
+    }
+    window.removeEventListener('click', unlock);
+    window.removeEventListener('touchstart', unlock);
+  };
+  window.addEventListener('click', unlock);
+  window.addEventListener('touchstart', unlock);
 }
 
 export function useSoundAlert(trigger: any) {
   const lastTriggerRef = useRef<string | null>(null);
 
-  const play = useCallback(() => {
-    playAlertSound(1.0); // Full volume
-  }, []);
-
   useEffect(() => {
     if (!trigger) return;
 
-    // Deduplicate: only play if trigger changed
     const triggerKey = JSON.stringify(trigger);
     if (triggerKey === lastTriggerRef.current) return;
     lastTriggerRef.current = triggerKey;
 
-    play();
-  }, [trigger, play]);
+    playAlertSound();
+  }, [trigger]);
 }
