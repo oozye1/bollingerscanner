@@ -125,6 +125,7 @@ export function useMarketData(symbols: SymbolDef[]) {
 
   const isFetching = useRef(false);
   const prevStatuses = useRef<Record<string, string>>({});
+  const isFirstFetch = useRef(true);
 
   const addLog = useCallback(
     (symbol: string, ok: boolean, message: string) => {
@@ -212,21 +213,23 @@ export function useMarketData(symbols: SymbolDef[]) {
               ok++;
 
               // Sound alert ONLY when price actually touches/crosses a band
-              // (above-upper or below-lower) — not for "near" zones
-              const isHardSignal =
-                scannerData.status === 'above-upper' ||
-                scannerData.status === 'below-lower';
-              const prevStatus = prevStatuses.current[symbolObj.symbol] || 'ok';
-              if (
-                isHardSignal &&
-                scannerData.status !== prevStatus &&
-                isMarketOpen(symbolObj.type)
-              ) {
-                setLastAlert({
-                  symbol: symbolObj.symbol,
-                  type: scannerData.status,
-                  time: Date.now(),
-                });
+              // Skip the first fetch entirely (establishes baseline, no beeps)
+              if (!isFirstFetch.current) {
+                const isHardSignal =
+                  scannerData.status === 'above-upper' ||
+                  scannerData.status === 'below-lower';
+                const prevStatus = prevStatuses.current[symbolObj.symbol] || 'ok';
+                if (
+                  isHardSignal &&
+                  scannerData.status !== prevStatus &&
+                  isMarketOpen(symbolObj.type)
+                ) {
+                  setLastAlert({
+                    symbol: symbolObj.symbol,
+                    type: scannerData.status,
+                    time: Date.now(),
+                  });
+                }
               }
               prevStatuses.current[symbolObj.symbol] = scannerData.status;
             }
@@ -259,6 +262,7 @@ export function useMarketData(symbols: SymbolDef[]) {
       setNextFetchTime(Date.now() + POLL_INTERVAL);
       setLoading(false);
       isFetching.current = false;
+      isFirstFetch.current = false;
     };
 
     fetchAll();
