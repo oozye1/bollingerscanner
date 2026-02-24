@@ -211,12 +211,14 @@ export function useMarketData(symbols: SymbolDef[]) {
               );
               ok++;
 
-              // Only fire sound alert when:
-              // 1. The market is actually open for this symbol type
-              // 2. The status CHANGED to an alert state (not repeated same status)
+              // Sound alert ONLY when price actually touches/crosses a band
+              // (above-upper or below-lower) — not for "near" zones
+              const isHardSignal =
+                scannerData.status === 'above-upper' ||
+                scannerData.status === 'below-lower';
               const prevStatus = prevStatuses.current[symbolObj.symbol] || 'ok';
               if (
-                scannerData.status !== 'ok' &&
+                isHardSignal &&
                 scannerData.status !== prevStatus &&
                 isMarketOpen(symbolObj.type)
               ) {
