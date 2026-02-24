@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import type { SymbolDef } from '../lib/utils';
+import { type SymbolDef, isMarketOpen } from '../lib/utils';
 import {
   calculateBollingerBands,
   getBandPosition,
@@ -124,6 +124,7 @@ export function useMarketData(symbols: SymbolDef[]) {
   const [failCount, setFailCount] = useState(0);
 
   const isFetching = useRef(false);
+  const prevStatuses = useRef<Record<string, string>>({});
 
   const addLog = useCallback(
     (symbol: string, ok: boolean, message: string) => {
@@ -210,13 +211,22 @@ export function useMarketData(symbols: SymbolDef[]) {
               );
               ok++;
 
-              if (scannerData.status !== 'ok') {
+              // Only fire sound alert when:
+              // 1. The market is actually open for this symbol type
+              // 2. The status CHANGED to an alert state (not repeated same status)
+              const prevStatus = prevStatuses.current[symbolObj.symbol] || 'ok';
+              if (
+                scannerData.status !== 'ok' &&
+                scannerData.status !== prevStatus &&
+                isMarketOpen(symbolObj.type)
+              ) {
                 setLastAlert({
                   symbol: symbolObj.symbol,
                   type: scannerData.status,
                   time: Date.now(),
                 });
               }
+              prevStatuses.current[symbolObj.symbol] = scannerData.status;
             }
           }
         }
