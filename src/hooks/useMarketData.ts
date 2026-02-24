@@ -125,6 +125,7 @@ export function useMarketData(symbols: SymbolDef[]) {
 
   const isFetching = useRef(false);
   const prevStatuses = useRef<Record<string, string>>({});
+  const alertStreak = useRef<Record<string, number>>({});
   const isFirstFetch = useRef(true);
 
   const addLog = useCallback(
@@ -212,25 +213,38 @@ export function useMarketData(symbols: SymbolDef[]) {
               );
               ok++;
 
-              // Sound alert ONLY when price actually touches/crosses a band
-              // Skip the first fetch entirely (establishes baseline, no beeps)
-              if (!isFirstFetch.current) {
-                const isHardSignal =
-                  scannerData.status === 'above-upper' ||
-                  scannerData.status === 'below-lower';
-                const prevStatus = prevStatuses.current[symbolObj.symbol] || 'ok';
-                if (
-                  isHardSignal &&
-                  scannerData.status !== prevStatus &&
-                  isMarketOpen(symbolObj.type)
-                ) {
-                  setLastAlert({
-                    symbol: symbolObj.symbol,
-                    type: scannerData.status,
-                    time: Date.now(),
-                  });
-                }
+              // Sound alert: price must be beyond the band for 2 CONSECUTIVE
+              // fetches before beeping. Prevents false alerts from brief touches.
+              const isHardSignal =
+                scannerData.status === 'above-upper' ||
+                scannerData.status === 'below-lower';
+
+              if (isHardSignal) {
+                alertStreak.current[symbolObj.symbol] =
+                  (alertStreak.current[symbolObj.symbol] || 0) + 1;
+              } else {
+                alertStreak.current[symbolObj.symbol] = 0;
               }
+
+              const prevStatus = prevStatuses.current[symbolObj.symbol] || 'ok';
+              const streak = alertStreak.current[symbolObj.symbol] || 0;
+
+              if (
+                !isFirstFetch.current &&
+                isHardSignal &&
+                streak >= 2 &&
+                prevStatus === scannerData.status &&
+                isMarketOpen(symbolObj.type)
+              ) {
+                setLastAlert({
+                  symbol: symbolObj.symbol,
+                  type: scannerData.status,
+                  time: Date.now(),
+                });
+                // Reset streak so it doesn't keep beeping every fetch
+                alertStreak.current[symbolObj.symbol] = -999;
+              }
+
               prevStatuses.current[symbolObj.symbol] = scannerData.status;
             }
           }
