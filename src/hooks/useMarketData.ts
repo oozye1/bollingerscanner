@@ -7,7 +7,7 @@ import {
   type ScannerData,
 } from '../lib/indicators';
 
-const POLL_INTERVAL = 30_000;
+const POLL_INTERVAL = 60_000;
 
 export interface FetchLog {
   symbol: string;
