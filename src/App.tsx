@@ -520,7 +520,7 @@ export default function App() {
               Bollinger Scanner
             </h1>
             <p className="text-zinc-500 text-sm mt-0.5">
-              Mean reversion alerts &middot; Bollinger Bands (20, 2.0 SD) &middot; 5m candles
+              Mean reversion alerts &middot; Bollinger Bands (20, 2.0 SD) &middot; 1m candles
             </p>
           </div>
 

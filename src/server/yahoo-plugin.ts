@@ -7,13 +7,13 @@ interface CacheEntry {
 }
 
 const cache = new Map<string, CacheEntry>();
-const CACHE_TTL = 55_000; // 55 seconds (just under our 60s poll interval)
+const CACHE_TTL = 25_000; // 25 seconds (just under our 30s poll interval for 1m candles)
 let lastRequestTime = 0;
 const MIN_REQUEST_GAP = 4000; // 4 seconds between Yahoo requests
 
 function fetchFromYahoo(symbol: string): Promise<any> {
   return new Promise((resolve, reject) => {
-    const url = `/v8/finance/chart/${encodeURIComponent(symbol)}?interval=5m&range=5d&includePrePost=false`;
+    const url = `/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1m&range=1d&includePrePost=false`;
 
     const options: https.RequestOptions = {
       hostname: 'query2.finance.yahoo.com',

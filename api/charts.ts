@@ -7,11 +7,11 @@ interface CacheEntry {
 }
 
 const cache = new Map<string, CacheEntry>();
-const CACHE_TTL = 55_000;
+const CACHE_TTL = 25_000;
 
 function fetchFromYahoo(symbol: string): Promise<any> {
   return new Promise((resolve, reject) => {
-    const urlPath = `/v8/finance/chart/${encodeURIComponent(symbol)}?interval=5m&range=5d&includePrePost=false`;
+    const urlPath = `/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1m&range=1d&includePrePost=false`;
 
     const options: https.RequestOptions = {
       hostname: 'query2.finance.yahoo.com',
